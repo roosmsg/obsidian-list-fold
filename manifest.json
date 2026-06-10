@@ -1,0 +1,10 @@
+{
+	"id": "list-fold",
+	"name": "List Fold",
+	"version": "1.0.0",
+	"minAppVersion": "1.0.0",
+	"description": "Toggle fold/unfold on list items only, without affecting headings.",
+	"author": "Amin Ica",
+	"authorUrl": "https://github.com/rezgi",
+	"isDesktopOnly": true
+}
