@@ -32,7 +32,7 @@ function getEditorView(editor) {
 function collectFoldableListItems(view) {
   const items = [];
   const doc = view.state.doc;
-  const tree = (0, import_language.syntaxTree)(view.state);
+  const tree = (0, import_language.ensureSyntaxTree)(view.state, doc.length, 5e3) ?? (0, import_language.syntaxTree)(view.state);
   for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
     const line = doc.line(lineNum);
     const lineText = line.text;
@@ -75,13 +75,15 @@ function getFoldedSet(view) {
   }
   return folded;
 }
+function selectTargets(items, topLevelOnly) {
+  if (!topLevelOnly) return items;
+  const minIndent = Math.min(...items.map((i) => i.indent));
+  return items.filter((item) => item.indent === minIndent);
+}
 function toggleListFolds(view, topLevelOnly) {
   const items = collectFoldableListItems(view);
   if (items.length === 0) return;
-  const targets = topLevelOnly ? items.filter((item) => {
-    const minIndent = Math.min(...items.map((i) => i.indent));
-    return item.indent === minIndent;
-  }) : items;
+  const targets = selectTargets(items, topLevelOnly);
   if (targets.length === 0) return;
   const folded = getFoldedSet(view);
   const foldedCount = targets.filter((t) => folded.has(t.from)).length;
@@ -97,23 +99,50 @@ function toggleListFolds(view, topLevelOnly) {
     view.dispatch({ effects });
   }
 }
+function toggleListFoldsInPreview(view, subView, topLevelOnly) {
+  const items = collectFoldableListItems(view);
+  if (items.length === 0) return;
+  const targets = selectTargets(items, topLevelOnly);
+  if (targets.length === 0) return;
+  const doc = view.state.doc;
+  const lineOf = (pos) => doc.lineAt(pos).number - 1;
+  const targetFolds = targets.map((t) => ({ from: lineOf(t.from), to: lineOf(t.to) }));
+  const targetStarts = new Set(targetFolds.map((f) => f.from));
+  const current = subView.getFoldInfo() ?? { folds: [], lines: doc.lines };
+  const foldedStarts = new Set(current.folds.map((f) => f.from));
+  const foldedCount = targetFolds.filter((f) => foldedStarts.has(f.from)).length;
+  const shouldUnfold = foldedCount > targetFolds.length / 2;
+  const folds = shouldUnfold ? current.folds.filter((f) => !targetStarts.has(f.from)) : [...current.folds, ...targetFolds.filter((f) => !foldedStarts.has(f.from))];
+  subView.applyFoldInfo({ folds, lines: doc.lines });
+}
+function runToggle(editor, mdView, topLevelOnly) {
+  const ev = getEditorView(editor);
+  if (!ev) return;
+  if (mdView.getMode() === "preview") {
+    const subView = mdView.currentMode;
+    if (typeof subView.getFoldInfo === "function" && typeof subView.applyFoldInfo === "function") {
+      toggleListFoldsInPreview(ev, subView, topLevelOnly);
+      return;
+    }
+  }
+  toggleListFolds(ev, topLevelOnly);
+}
 var ListFoldPlugin = class extends import_obsidian.Plugin {
   onload() {
     this.addCommand({
       id: "toggle-fold-top-level-lists",
       name: "Toggle fold top-level lists",
-      editorCallback: (editor, view) => {
-        const ev = getEditorView(editor);
-        if (ev) toggleListFolds(ev, true);
-      }
+      // Obsidian disables editorCallback commands (hidden from the palette,
+      // hotkey ignored) while the note is in reading view unless this
+      // undocumented flag is set.
+      allowPreview: true,
+      editorCallback: (editor, view) => runToggle(editor, view, true)
     });
     this.addCommand({
       id: "toggle-fold-all-lists",
       name: "Toggle fold all list levels",
-      editorCallback: (editor, view) => {
-        const ev = getEditorView(editor);
-        if (ev) toggleListFolds(ev, false);
-      }
+      allowPreview: true,
+      editorCallback: (editor, view) => runToggle(editor, view, false)
     });
   }
 };
